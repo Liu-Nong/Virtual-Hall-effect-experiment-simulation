@@ -3,10 +3,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-霍尔效应虚拟仿真实验 - 2.3.0
-- 实验类型：UH-IM曲线测绘 → B-IM曲线测绘
-- B-IM 模式下 UI 动态切换为 B1~B4、BH
-- 保留 2.2.0 全部功能
+霍尔效应虚拟仿真实验 - 2.2.0
+- UI 显示 V_H1~V_H4 → U1~U4，平均值 V_H → UH
+- 表格/CSV/JSON/Word 报告的键名：括号 () → 斜杠 /，VH → U
+- 保留 2.1.3 全部功能
 """
 
 import tkinter as tk
@@ -82,7 +82,7 @@ def static_tip(widget, text):
 class HallEffectSimulation:
     def __init__(self, root):
         self.root = root
-        self.root.title("霍尔效应实验虚拟仿真 - 2.3.0")
+        self.root.title("霍尔效应实验虚拟仿真 - 2.2.0")
         self.root.geometry("1600x900")
         self.root.grid_rowconfigure(0, weight=0)
         self.root.grid_rowconfigure(1, weight=1)
@@ -165,9 +165,6 @@ class HallEffectSimulation:
 
         self.dragging_probe = False
 
-        # ★ B-IM 模式显示状态
-        self.current_mode_is_B = False
-
         self.electrons = []
         self.view_initialized = False
         self.init_electrons()
@@ -186,7 +183,7 @@ class HallEffectSimulation:
     def create_toolbar(self):
         toolbar = ttk.Frame(self.root, padding="5", relief=tk.RAISED)
         toolbar.grid(row=0, column=0, sticky="ew")
-        ttk.Label(toolbar, text="霍尔效应实验 2.3.0", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=10)
+        ttk.Label(toolbar, text="霍尔效应实验 2.2.0", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=10)
         self.power_button = ttk.Button(toolbar, text="电源: OFF", command=self.toggle_power, width=12)
         self.power_button.pack(side=tk.LEFT, padx=5)
         self.pause_button = ttk.Button(toolbar, text="⏸️ 暂停", command=self.toggle_animation, width=10)
@@ -390,9 +387,8 @@ class HallEffectSimulation:
         f4.pack(fill="x", pady=5)
         left_frame = ttk.Frame(f4); left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         ttk.Label(left_frame, text="类型：").pack(anchor="w")
-        # ★ B-IM 曲线测绘替代 UH-IM 曲线测绘
         type_combo = ttk.Combobox(left_frame, textvariable=self.experiment_type,
-                                  values=["自由探索", "UH-IS曲线测绘", "B-IM曲线测绘"],
+                                  values=["自由探索", "UH-IS曲线测绘", "UH-IM曲线测绘"],
                                   state="readonly", width=18)
         type_combo.pack(fill=tk.X, pady=2)
         type_combo.bind("<<ComboboxSelected>>", self.on_mode_change)
@@ -499,11 +495,10 @@ class HallEffectSimulation:
         def on_mousewheel(event): canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         canvas.bind("<MouseWheel>", on_mousewheel); scrollable.bind("<MouseWheel>", on_mousewheel)
 
-        # ★ 保存 v_frame 引用，供 B-IM 模式切换标题
-        self.v_frame = ttk.LabelFrame(scrollable, text="霍尔电压测量结果", padding="5")
-        self.v_frame.pack(fill="x", pady=5)
-        v_frame = self.v_frame
+        v_frame = ttk.LabelFrame(scrollable, text="霍尔电压测量结果", padding="5")
+        v_frame.pack(fill="x", pady=5)
 
+        # ★★★ UI 显示：U1 / U2 / U3 / U4 / UH
         self.VH1_label = ttk.Label(v_frame, text="U1 = 0.0000 mV"); self.VH1_label.pack(anchor="w")
         DynamicToolTip(self.VH1_label, self.get_vh1_tip)
         self.VH2_label = ttk.Label(v_frame, text="U2 = 0.0000 mV"); self.VH2_label.pack(anchor="w")
@@ -523,12 +518,9 @@ class HallEffectSimulation:
         self.v_label = ttk.Label(p_frame, text="v = 0.0000 m/s"); self.v_label.pack(anchor="w")
         self.mu_label = ttk.Label(p_frame, text="μ = 0.0000 cm²/(V·s)"); self.mu_label.pack(anchor="w")
 
-        # ★ 保存 table_frame 引用，供 B-IM 模式切换标题
-        self.table_frame = ttk.LabelFrame(scrollable, text="实验数据表格", padding="5")
-        self.table_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        table_frame = self.table_frame
-
-        # 数据列 key 保持 U1/mV ~ U4/mV、UH/mV，通过 heading 动态改变显示文本
+        # ★★★ 表格列名：括号 () → 斜杠 /
+        table_frame = ttk.LabelFrame(scrollable, text="实验数据表格", padding="5")
+        table_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         columns = ('序号', 'Is/mA', 'Im/A', 'B/T', 'U1/mV', 'U2/mV', 'U3/mV', 'U4/mV', 'UH/mV')
         self.data_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=10)
         column_widths = [40, 60, 60, 80, 80, 80, 80, 80, 80]
@@ -606,6 +598,7 @@ class HallEffectSimulation:
 
         f4 = ttk.LabelFrame(scrollable, text="测量数据", padding="5")
         f4.pack(fill=tk.BOTH, expand=True, pady=5)
+        # ★★★ 磁场分布表列名：x(mm) → x/mm，B(T) → B/T
         cols = ('序号', 'x/mm', 'B/T')
         self.field_tree = ttk.Treeview(f4, columns=cols, show='headings', height=10)
         widths = [60, 120, 150]
@@ -767,6 +760,7 @@ class HallEffectSimulation:
             last = self.field_distribution_data[-1]
             if abs(last['x/mm'] - self.probe_x.get()) < 0.0001:
                 messagebox.showwarning("提示", "探头位置没有变化！\n请调整位置后再记录。"); return
+        # ★★★ 键名用 x/mm 和 B/T
         point = {'序号': len(self.field_distribution_data) + 1,
                  'x/mm': self.probe_x.get(), 'B/T': self.B.get()}
         self.field_distribution_data.append(point)
@@ -792,6 +786,7 @@ class HallEffectSimulation:
         filename = os.path.join(desktop, f"磁场分布_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         try:
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+                # ★★★ CSV 表头：x/mm、B/T
                 writer = csv.DictWriter(f, fieldnames=['序号', 'x/mm', 'B/T'])
                 writer.writeheader()
                 for p in self.field_distribution_data:
@@ -824,6 +819,7 @@ class HallEffectSimulation:
             t.cell(4,0).text = '平台区比例 x_flat/x_max'; t.cell(4,1).text = f'{self.x_flat_ratio.get():.4f}'
             t.cell(5,0).text = '中心磁场 B0/T'; t.cell(5,1).text = f'{(self.C.get()*self.I_m.get())/10:.4f}'
             doc.add_heading('二、测量数据', level=1)
+            # ★★★ Word 表头：x/mm、B/T
             cols = ['序号', 'x/mm', 'B/T']
             dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
             for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
@@ -844,34 +840,15 @@ class HallEffectSimulation:
         except Exception as e:
             messagebox.showerror("错误", f"生成失败: {str(e)}")
 
-    # ---------- Tooltip ----------
+    # ---------- Tooltip（U1~U4） ----------
     def get_vh1_tip(self):
-        if self.current_mode_is_B:
-            return "B1 = 由 U1 换算得到的磁感应强度\n换算公式：B1 = 1000·U1 / (K_H · I_S)"
-        if self.secondary_mode.get() == "仿真":
-            return "虚仿：U1 = 主电压(+I,+B) + V₀ + Vₜ + Vₚ"
-        return "纯理论：无副效应叠加"
-
+        return "虚仿：U1 = 主电压(+I,+B) + V₀ + Vₜ + Vₚ" if self.secondary_mode.get() == "仿真" else "纯理论：无副效应叠加"
     def get_vh2_tip(self):
-        if self.current_mode_is_B:
-            return "B2 = 由 U2 换算得到的磁感应强度\n换算公式：B2 = 1000·U2 / (K_H · I_S)"
-        if self.secondary_mode.get() == "仿真":
-            return "虚仿：U2 = 主电压(+I,-B) + V₀ - Vₜ - Vₚ"
-        return "纯理论：无副效应叠加"
-
+        return "虚仿：U2 = 主电压(+I,-B) + V₀ - Vₜ - Vₚ" if self.secondary_mode.get() == "仿真" else "纯理论：无副效应叠加"
     def get_vh3_tip(self):
-        if self.current_mode_is_B:
-            return "B3 = 由 U3 换算得到的磁感应强度\n换算公式：B3 = 1000·U3 / (K_H · I_S)"
-        if self.secondary_mode.get() == "仿真":
-            return "虚仿：U3 = 主电压(-I,-B) - V₀ - Vₜ + Vₚ"
-        return "纯理论：无副效应叠加"
-
+        return "虚仿：U3 = 主电压(-I,-B) - V₀ - Vₜ + Vₚ" if self.secondary_mode.get() == "仿真" else "纯理论：无副效应叠加"
     def get_vh4_tip(self):
-        if self.current_mode_is_B:
-            return "B4 = 由 U4 换算得到的磁感应强度\n换算公式：B4 = 1000·U4 / (K_H · I_S)"
-        if self.secondary_mode.get() == "仿真":
-            return "虚仿：U4 = 主电压(-I,+B) - V₀ + Vₜ - Vₚ"
-        return "纯理论：无副效应叠加"
+        return "虚仿：U4 = 主电压(-I,+B) - V₀ + Vₜ - Vₚ" if self.secondary_mode.get() == "仿真" else "纯理论：无副效应叠加"
 
     # ---------- 粒子数量 ----------
     def update_particle_count(self):
@@ -959,33 +936,6 @@ class HallEffectSimulation:
         self.measurements = []; self.update_data_table()
         self.update_calculations(); self.update_mark_labels()
         self.update_secondary_sliders_state()
-        # ★ 切换显示模式（U ↔ B）
-        self.update_display_mode()
-
-    # ★ 新增：根据实验类型切换 UI 显示
-    def update_display_mode(self):
-        is_B_mode = (self.experiment_type.get() == "B-IM曲线测绘")
-        self.current_mode_is_B = is_B_mode
-
-        if is_B_mode:
-            self.v_frame.config(text="磁感应强度测量结果")
-            self.table_frame.config(text="磁场标定数据表格")
-            self.data_tree.heading('U1/mV', text='B1/mT')
-            self.data_tree.heading('U2/mV', text='B2/mT')
-            self.data_tree.heading('U3/mV', text='B3/mT')
-            self.data_tree.heading('U4/mV', text='B4/mT')
-            self.data_tree.heading('UH/mV', text='BH/mT')
-        else:
-            self.v_frame.config(text="霍尔电压测量结果")
-            self.table_frame.config(text="实验数据表格")
-            self.data_tree.heading('U1/mV', text='U1/mV')
-            self.data_tree.heading('U2/mV', text='U2/mV')
-            self.data_tree.heading('U3/mV', text='U3/mV')
-            self.data_tree.heading('U4/mV', text='U4/mV')
-            self.data_tree.heading('UH/mV', text='UH/mV')
-
-        self.update_labels()
-        self.update_data_table()
 
     def update_mark_labels(self):
         mode = self.experiment_type.get()
@@ -993,7 +943,7 @@ class HallEffectSimulation:
         self.im_label.config(foreground="black", font=("Arial", 12))
         if mode == "UH-IS曲线测绘":
             self.is_label.config(foreground="red", font=("Arial", 12, "underline"))
-        elif mode == "B-IM曲线测绘":
+        elif mode == "UH-IM曲线测绘":
             self.im_label.config(foreground="red", font=("Arial", 12, "underline"))
 
     def on_semiconductor_changed(self, event=None):
@@ -1099,33 +1049,13 @@ class HallEffectSimulation:
         if current == 2: self.update_field_distribution_plot()
         else: self.update_3d_plot()
 
-    # ★ 修改：根据当前模式显示 U 或 B
     def update_labels(self):
-        if self.current_mode_is_B:
-            # B-IM 模式：把 mV 换算为 mT
-            K_H = self.KH.get()
-            Is_mA = self.Is.get()
-            if abs(K_H * Is_mA) > 1e-9:
-                factor = 1000.0 / (K_H * Is_mA)
-                B1 = self.VH1.get() * factor
-                B2 = self.VH2.get() * factor
-                B3 = self.VH3.get() * factor
-                B4 = self.VH4.get() * factor
-                BH = self.VH_avg.get() * factor
-            else:
-                B1 = B2 = B3 = B4 = BH = 0.0
-            self.VH1_label.config(text=f"B1 = {B1:.4f} mT")
-            self.VH2_label.config(text=f"B2 = {B2:.4f} mT")
-            self.VH3_label.config(text=f"B3 = {B3:.4f} mT")
-            self.VH4_label.config(text=f"B4 = {B4:.4f} mT")
-            self.VH_avg_label.config(text=f"BH = {BH:.4f} mT")
-        else:
-            self.VH1_label.config(text=f"U1 = {self.VH1.get():.4f} mV")
-            self.VH2_label.config(text=f"U2 = {self.VH2.get():.4f} mV")
-            self.VH3_label.config(text=f"U3 = {self.VH3.get():.4f} mV")
-            self.VH4_label.config(text=f"U4 = {self.VH4.get():.4f} mV")
-            self.VH_avg_label.config(text=f"UH = {self.VH_avg.get():.4f} mV")
-
+        # ★★★ UI 显示：U1~U4、UH
+        self.VH1_label.config(text=f"U1 = {self.VH1.get():.4f} mV")
+        self.VH2_label.config(text=f"U2 = {self.VH2.get():.4f} mV")
+        self.VH3_label.config(text=f"U3 = {self.VH3.get():.4f} mV")
+        self.VH4_label.config(text=f"U4 = {self.VH4.get():.4f} mV")
+        self.VH_avg_label.config(text=f"UH = {self.VH_avg.get():.4f} mV")
         self.RH_label.config(text=f"RH = {self.RH.get():.4f} m³/C")
         n_val = self.n.get()
         self.n_label.config(text=f"n = {n_val:.4e} m⁻³" if n_val > 1e10 else "n = 0.0000 m⁻³")
@@ -1454,16 +1384,18 @@ class HallEffectSimulation:
             messagebox.showwarning("提示", "请先打开电源！"); return
         if self.measurements:
             last = self.measurements[-1]; mode = self.experiment_type.get()
+            # ★★★ 键名：Is/mA、Im/A
             if mode == "UH-IS曲线测绘":
                 if abs(last['Is/mA'] - self.Is.get()) < 0.0001:
                     messagebox.showwarning("提示", "工作电流Is没有变化！"); return
-            elif mode == "B-IM曲线测绘":
+            elif mode == "UH-IM曲线测绘":
                 if abs(last['Im/A'] - self.I_m.get()) < 0.0001:
                     messagebox.showwarning("提示", "励磁电流Im没有变化！"); return
             elif mode == "自由探索":
                 if (abs(last['Is/mA'] - self.Is.get()) < 0.0001 and
                     abs(last['Im/A'] - self.I_m.get()) < 0.0001):
                     messagebox.showwarning("提示", "参数没有变化！"); return
+        # ★★★ 数据点键名：括号 () → 斜杠 /
         data_point = {
             '序号': len(self.measurements) + 1,
             'Is/mA': self.Is.get(), 'Im/A': self.I_m.get(), 'B/T': self.B.get(),
@@ -1473,35 +1405,17 @@ class HallEffectSimulation:
         }
         self.measurements.append(data_point); self.update_data_table()
 
-    # ★ 修改：根据当前模式显示 U 或 B
     def update_data_table(self):
         for item in self.data_tree.get_children(): self.data_tree.delete(item)
-
-        if self.current_mode_is_B:
-            K_H = self.KH.get()
-            Is_mA = self.Is.get()
-            factor = 1000.0 / (K_H * Is_mA) if abs(K_H * Is_mA) > 1e-9 else 0.0
-            for m in self.measurements:
-                self.data_tree.insert('', 'end', values=(
-                    m['序号'],
-                    f"{m['Is/mA']:.4f}",
-                    f"{m['Im/A']:.4f}",
-                    f"{m['B/T'] * 1000:.4f}",
-                    f"{m['U1/mV'] * factor:.4f}",
-                    f"{m['U2/mV'] * factor:.4f}",
-                    f"{m['U3/mV'] * factor:.4f}",
-                    f"{m['U4/mV'] * factor:.4f}",
-                    f"{m['UH/mV'] * factor:.4f}"
-                ))
-        else:
-            for m in self.measurements:
-                self.data_tree.insert('', 'end', values=(
-                    m['序号'],
-                    f"{m['Is/mA']:.4f}", f"{m['Im/A']:.4f}", f"{m['B/T']:.4f}",
-                    f"{m['U1/mV']:.4f}", f"{m['U2/mV']:.4f}",
-                    f"{m['U3/mV']:.4f}", f"{m['U4/mV']:.4f}",
-                    f"{m['UH/mV']:.4f}"
-                ))
+        for m in self.measurements:
+            # ★★★ 从新键读取
+            self.data_tree.insert('', 'end', values=(
+                m['序号'],
+                f"{m['Is/mA']:.4f}", f"{m['Im/A']:.4f}", f"{m['B/T']:.4f}",
+                f"{m['U1/mV']:.4f}", f"{m['U2/mV']:.4f}",
+                f"{m['U3/mV']:.4f}", f"{m['U4/mV']:.4f}",
+                f"{m['UH/mV']:.4f}"
+            ))
 
     def clear_experiment_data(self):
         self.measurements = []; self.update_data_table()
@@ -1523,39 +1437,16 @@ class HallEffectSimulation:
                 ax.plot(Is_fit, fit_line(Is_fit), 'r-', label=f'拟合: y={coeffs[0]:.4f}x+{coeffs[1]:.4f}')
             ax.set_xlabel('工作电流 Is (mA)'); ax.set_ylabel('霍尔电压 UH (mV)')
             ax.set_title('UH-IS 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
-        elif mode == "B-IM曲线测绘":
-            # ★ B-IM 模式：绘制 B 与 Im 的关系
+        elif mode == "UH-IM曲线测绘":
             Im_vals = [m['Im/A'] for m in self.measurements]
-            B_vals = [m['B/T'] * 1000 for m in self.measurements]  # 转 mT
-            pairs = sorted(zip(Im_vals, B_vals))
-            Im_sorted = [p[0] for p in pairs]
-            B_sorted = [p[1] for p in pairs]
-            ax.scatter(Im_sorted, B_sorted, color='green', s=50, label='测量点', zorder=5)
-            if len(Im_sorted) > 1:
-                coeffs = np.polyfit(Im_sorted, B_sorted, 1)
-                fit_line = np.poly1d(coeffs)
-                Im_fit = np.linspace(0, max(Im_sorted) * 1.1, 100)
-                ax.plot(Im_fit, fit_line(Im_fit), 'r--', linewidth=2,
-                        label=f'拟合: B = {coeffs[0]:.4f}·Im + {coeffs[1]:.4f}')
-                C_fit = coeffs[0] * 10  # 因为 B = C·Im/10，斜率 = C/10
-                C_set = self.C.get()
-                ax.text(0.05, 0.95,
-                        f'拟合斜率 k = {coeffs[0]:.4f} mT/A\n'
-                        f'反推 C = {C_fit:.4f} kG/sA\n'
-                        f'设定 C = {C_set:.4f} kG/sA\n'
-                        f'相对偏差 = {abs(C_fit - C_set) / C_set * 100:.4f}%',
-                        transform=ax.transAxes, verticalalignment='top',
-                        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8),
-                        fontsize=10)
-            Im_theory = np.linspace(0, max(Im_sorted) * 1.1, 100)
-            B_theory = (self.C.get() * Im_theory) / 10.0 * 1000
-            ax.plot(Im_theory, B_theory, 'b:', linewidth=1.5, alpha=0.6,
-                    label='理论曲线 B = C·Im/10')
-            ax.set_xlabel('励磁电流 Im /A')
-            ax.set_ylabel('磁感应强度 B /mT')
-            ax.set_title('B-IM 关系曲线（磁场标定）')
-            ax.grid(True, alpha=0.3)
-            ax.legend(loc='lower right')
+            VH_vals = [m['UH/mV'] for m in self.measurements]
+            ax.scatter(Im_vals, VH_vals, color='green', s=50, label='测量点')
+            if len(Im_vals) > 1:
+                coeffs = np.polyfit(Im_vals, VH_vals, 1); fit_line = np.poly1d(coeffs)
+                Im_fit = np.linspace(min(Im_vals), max(Im_vals), 100)
+                ax.plot(Im_fit, fit_line(Im_fit), 'r-', label=f'拟合: y={coeffs[0]:.4f}x+{coeffs[1]:.4f}')
+            ax.set_xlabel('励磁电流 Im (A)'); ax.set_ylabel('霍尔电压 UH (mV)')
+            ax.set_title('UH-IM 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
         else:
             indices = list(range(len(self.measurements)))
             VH_vals = [m['UH/mV'] for m in self.measurements]
@@ -1582,40 +1473,24 @@ class HallEffectSimulation:
         filename = os.path.join(desktop, f"hall_effect_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}")
         try:
             if fmt == "json":
+                # ★★★ JSON 键名：U1/mV ~ U4/mV、UH/mV、Is/mA、Im/A、B/T
                 data = {
                     'experiment_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'experiment_mode': self.experiment_type.get(),
                     'secondary_mode': self.secondary_mode.get(),
                     'parameters': {
-                        'L': round(self.L.get(), 4), 'b': round(self.b.get(), 4),
-                        'd': round(self.d.get(), 4), 'KH': round(self.KH.get(), 4),
-                        'sigma': round(self.sigma.get(), 4), 'C': round(self.C.get(), 4),
-                        'alpha': round(self.alpha.get(), 4), 'beta': round(self.beta.get(), 4),
+                        'L': round(self.L.get(), 4),
+                        'b': round(self.b.get(), 4),
+                        'd': round(self.d.get(), 4),
+                        'KH': round(self.KH.get(), 4),
+                        'sigma': round(self.sigma.get(), 4),
+                        'C': round(self.C.get(), 4),
+                        'alpha': round(self.alpha.get(), 4),
+                        'beta': round(self.beta.get(), 4),
                         'gamma': round(self.gamma.get(), 4),
                     },
-                    'measurements': []
-                }
-                # ★ B-IM 模式下，JSON 键名切换为 B 系列
-                if self.current_mode_is_B:
-                    K_H = self.KH.get()
-                    Is_mA = self.Is.get()
-                    factor = 1000.0 / (K_H * Is_mA) if abs(K_H * Is_mA) > 1e-9 else 0.0
-                    for m in self.measurements:
-                        data['measurements'].append({
-                            '序号': m['序号'],
-                            'Is/mA': round(m['Is/mA'], 4),
-                            'Im/A': round(m['Im/A'], 4),
-                            'B/mT': round(m['B/T'] * 1000, 4),
-                            'B1/mT': round(m['U1/mV'] * factor, 4),
-                            'B2/mT': round(m['U2/mV'] * factor, 4),
-                            'B3/mT': round(m['U3/mV'] * factor, 4),
-                            'B4/mT': round(m['U4/mV'] * factor, 4),
-                            'BH/mT': round(m['UH/mV'] * factor, 4),
-                            'mode': m['mode']
-                        })
-                else:
-                    for m in self.measurements:
-                        data['measurements'].append({
+                    'measurements': [
+                        {
                             '序号': m['序号'],
                             'Is/mA': round(m['Is/mA'], 4),
                             'Im/A': round(m['Im/A'], 4),
@@ -1626,50 +1501,30 @@ class HallEffectSimulation:
                             'U4/mV': round(m['U4/mV'], 4),
                             'UH/mV': round(m['UH/mV'], 4),
                             'mode': m['mode']
-                        })
+                        } for m in self.measurements
+                    ]
+                }
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             else:
-                # ★ B-IM 模式下，CSV 表头切换为 B 系列
-                if self.current_mode_is_B:
-                    K_H = self.KH.get()
-                    Is_mA = self.Is.get()
-                    factor = 1000.0 / (K_H * Is_mA) if abs(K_H * Is_mA) > 1e-9 else 0.0
-                    fieldnames = ['序号', 'Is/mA', 'Im/A', 'B/mT',
-                                  'B1/mT', 'B2/mT', 'B3/mT', 'B4/mT', 'BH/mT']
-                    with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for m in self.measurements:
-                            writer.writerow({
-                                '序号': m['序号'],
-                                'Is/mA': f"{m['Is/mA']:.4f}",
-                                'Im/A': f"{m['Im/A']:.4f}",
-                                'B/mT': f"{m['B/T'] * 1000:.4f}",
-                                'B1/mT': f"{m['U1/mV'] * factor:.4f}",
-                                'B2/mT': f"{m['U2/mV'] * factor:.4f}",
-                                'B3/mT': f"{m['U3/mV'] * factor:.4f}",
-                                'B4/mT': f"{m['U4/mV'] * factor:.4f}",
-                                'BH/mT': f"{m['UH/mV'] * factor:.4f}"
-                            })
-                else:
-                    fieldnames = ['序号', 'Is/mA', 'Im/A', 'B/T', 'U1/mV', 'U2/mV',
-                                  'U3/mV', 'U4/mV', 'UH/mV']
-                    with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for m in self.measurements:
-                            writer.writerow({
-                                '序号': m['序号'],
-                                'Is/mA': f"{m['Is/mA']:.4f}",
-                                'Im/A': f"{m['Im/A']:.4f}",
-                                'B/T': f"{m['B/T']:.4f}",
-                                'U1/mV': f"{m['U1/mV']:.4f}",
-                                'U2/mV': f"{m['U2/mV']:.4f}",
-                                'U3/mV': f"{m['U3/mV']:.4f}",
-                                'U4/mV': f"{m['U4/mV']:.4f}",
-                                'UH/mV': f"{m['UH/mV']:.4f}"
-                            })
+                # ★★★ CSV 表头：U1/mV ~ U4/mV、UH/mV、Is/mA、Im/A、B/T
+                fieldnames = ['序号', 'Is/mA', 'Im/A', 'B/T', 'U1/mV', 'U2/mV',
+                              'U3/mV', 'U4/mV', 'UH/mV']
+                with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for m in self.measurements:
+                        writer.writerow({
+                            '序号': m['序号'],
+                            'Is/mA': f"{m['Is/mA']:.4f}",
+                            'Im/A': f"{m['Im/A']:.4f}",
+                            'B/T': f"{m['B/T']:.4f}",
+                            'U1/mV': f"{m['U1/mV']:.4f}",
+                            'U2/mV': f"{m['U2/mV']:.4f}",
+                            'U3/mV': f"{m['U3/mV']:.4f}",
+                            'U4/mV': f"{m['U4/mV']:.4f}",
+                            'UH/mV': f"{m['UH/mV']:.4f}"
+                        })
             messagebox.showinfo("成功", f"数据已导出到桌面:\n{filename}")
         except Exception as e:
             messagebox.showerror("错误", f"导出失败: {str(e)}")
@@ -1695,6 +1550,7 @@ class HallEffectSimulation:
             t.cell(4,0).text = '数据点数'; t.cell(4,1).text = str(len(self.measurements))
             doc.add_heading('二、实验参数', level=1)
             t2 = doc.add_table(rows=8, cols=2); t2.style = 'Light Grid Accent 1'
+            # ★★★ 参数表也改成斜杠形式
             params = [
                 ('样品长度 L/mm', f'{self.L.get():.4f}'),
                 ('样品宽度 b/mm', f'{self.b.get():.4f}'),
@@ -1708,61 +1564,29 @@ class HallEffectSimulation:
             for i, (k, v) in enumerate(params):
                 t2.cell(i,0).text = k; t2.cell(i,1).text = v
             doc.add_heading('三、测量数据', level=1)
-
-            # ★ 根据模式选择表头
-            if self.current_mode_is_B:
-                K_H = self.KH.get()
-                Is_mA = self.Is.get()
-                factor = 1000.0 / (K_H * Is_mA) if abs(K_H * Is_mA) > 1e-9 else 0.0
-                cols = ['序号','Is/mA','Im/A','B/mT','B1/mT','B2/mT','B3/mT','B4/mT','BH/mT']
-                dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
-                for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
-                for m in self.measurements:
-                    row = dt.add_row().cells
-                    row[0].text = str(m['序号'])
-                    row[1].text = f"{m['Is/mA']:.4f}"
-                    row[2].text = f"{m['Im/A']:.4f}"
-                    row[3].text = f"{m['B/T'] * 1000:.4f}"
-                    row[4].text = f"{m['U1/mV'] * factor:.4f}"
-                    row[5].text = f"{m['U2/mV'] * factor:.4f}"
-                    row[6].text = f"{m['U3/mV'] * factor:.4f}"
-                    row[7].text = f"{m['U4/mV'] * factor:.4f}"
-                    row[8].text = f"{m['UH/mV'] * factor:.4f}"
-            else:
-                cols = ['序号','Is/mA','Im/A','B/T','U1/mV','U2/mV','U3/mV','U4/mV','UH/mV']
-                dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
-                for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
-                for m in self.measurements:
-                    row = dt.add_row().cells
-                    row[0].text = str(m['序号'])
-                    row[1].text = f"{m['Is/mA']:.4f}"
-                    row[2].text = f"{m['Im/A']:.4f}"
-                    row[3].text = f"{m['B/T']:.4f}"
-                    row[4].text = f"{m['U1/mV']:.4f}"
-                    row[5].text = f"{m['U2/mV']:.4f}"
-                    row[6].text = f"{m['U3/mV']:.4f}"
-                    row[7].text = f"{m['U4/mV']:.4f}"
-                    row[8].text = f"{m['UH/mV']:.4f}"
-
+            # ★★★ 表头：斜杠形式
+            cols = ['序号','Is/mA','Im/A','B/T','U1/mV','U2/mV','U3/mV','U4/mV','UH/mV']
+            dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
+            for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
+            for m in self.measurements:
+                row = dt.add_row().cells
+                row[0].text = str(m['序号'])
+                row[1].text = f"{m['Is/mA']:.4f}"
+                row[2].text = f"{m['Im/A']:.4f}"
+                row[3].text = f"{m['B/T']:.4f}"
+                row[4].text = f"{m['U1/mV']:.4f}"
+                row[5].text = f"{m['U2/mV']:.4f}"
+                row[6].text = f"{m['U3/mV']:.4f}"
+                row[7].text = f"{m['U4/mV']:.4f}"
+                row[8].text = f"{m['UH/mV']:.4f}"
             if self.measurements:
                 doc.add_heading('四、统计信息', level=1)
-                if self.current_mode_is_B:
-                    K_H = self.KH.get()
-                    Is_mA = self.Is.get()
-                    factor = 1000.0 / (K_H * Is_mA) if abs(K_H * Is_mA) > 1e-9 else 0.0
-                    VH_vals = [m['UH/mV'] * factor for m in self.measurements]
-                    unit = 'mT'
-                    label = '磁感应强度 BH'
-                else:
-                    VH_vals = [m['UH/mV'] for m in self.measurements]
-                    unit = 'mV'
-                    label = '霍尔电压 UH'
+                VH_vals = [m['UH/mV'] for m in self.measurements]
                 t3 = doc.add_table(rows=4, cols=2); t3.style = 'Light Grid Accent 1'
-                t3.cell(0,0).text = f'{label}平均值 /{unit}'; t3.cell(0,1).text = f'{np.mean(VH_vals):.4f}'
-                t3.cell(1,0).text = f'{label}标准差 /{unit}'; t3.cell(1,1).text = f'{np.std(VH_vals):.4f}'
-                t3.cell(2,0).text = f'{label}最大值 /{unit}'; t3.cell(2,1).text = f'{np.max(VH_vals):.4f}'
-                t3.cell(3,0).text = f'{label}最小值 /{unit}'; t3.cell(3,1).text = f'{np.min(VH_vals):.4f}'
-
+                t3.cell(0,0).text = '霍尔电压平均值 UH/mV'; t3.cell(0,1).text = f'{np.mean(VH_vals):.4f}'
+                t3.cell(1,0).text = '霍尔电压标准差 UH/mV'; t3.cell(1,1).text = f'{np.std(VH_vals):.4f}'
+                t3.cell(2,0).text = '霍尔电压最大值 UH/mV'; t3.cell(2,1).text = f'{np.max(VH_vals):.4f}'
+                t3.cell(3,0).text = '霍尔电压最小值 UH/mV'; t3.cell(3,1).text = f'{np.min(VH_vals):.4f}'
             doc.add_heading('五、数据处理结果', level=1)
             t4 = doc.add_table(rows=4, cols=2); t4.style = 'Light Grid Accent 1'
             t4.cell(0,0).text = '霍尔系数 RH/m³·C⁻¹'; t4.cell(0,1).text = f'{self.RH.get():.4f}'
@@ -1772,11 +1596,7 @@ class HallEffectSimulation:
             doc.add_heading('六、备注', level=1)
             note = doc.add_paragraph()
             note.add_run('1. 本报告由霍尔效应实验虚拟仿真软件自动生成。\n')
-            if self.current_mode_is_B:
-                note.add_run('2. B-IM 曲线测绘模式：通过改变励磁电流 Im 测量磁感应强度 B，'
-                             '用于标定电磁铁励磁系数 C。理论关系为 B = C·Im/10。\n')
-            else:
-                note.add_run('2. 霍尔电压 U1~U4 采用对称测量法（四组 ±Is, ±B 组合取绝对值平均）计算，UH 为平均值。\n')
+            note.add_run('2. 霍尔电压 U1~U4 采用对称测量法（四组 ±Is, ±B 组合取绝对值平均）计算，UH 为平均值。\n')
             if self.secondary_mode.get() == '仿真':
                 note.add_run('3. 当前为仿真模式，测量值中叠加了不等位电势、热磁效应和交叉效应。\n')
             else:

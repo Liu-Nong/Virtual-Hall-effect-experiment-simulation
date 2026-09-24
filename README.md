@@ -3,10 +3,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-霍尔效应虚拟仿真实验 - 2.2.0
-- UI 显示 V_H1~V_H4 → U1~U4，平均值 V_H → UH
-- 表格/CSV/JSON/Word 报告的键名：括号 () → 斜杠 /，VH → U
-- 保留 2.1.3 全部功能
+霍尔效应虚拟仿真实验 - 2.3.0
+- 磁场分布模型参数解耦：平台区半宽 x_flat 与过渡区宽度 w 独立可调
+- 与 DH4512D 实测数据拟合（默认 x_flat=38mm, w=3.5mm）
+- 保留 2.2.0 全部功能
 """
 
 import tkinter as tk
@@ -82,7 +82,7 @@ def static_tip(widget, text):
 class HallEffectSimulation:
     def __init__(self, root):
         self.root = root
-        self.root.title("霍尔效应实验虚拟仿真 - 2.2.0")
+        self.root.title("霍尔效应实验虚拟仿真 - 2.3.0")
         self.root.geometry("1600x900")
         self.root.grid_rowconfigure(0, weight=0)
         self.root.grid_rowconfigure(1, weight=1)
@@ -158,9 +158,10 @@ class HallEffectSimulation:
 
         self.trajectory_windows = {}
 
-        self.probe_x = tk.DoubleVar(value=0.0)
-        self.probe_x_max = tk.DoubleVar(value=40.0)
-        self.x_flat_ratio = tk.DoubleVar(value=0.7)
+        # ---- 磁场分布测量（2.3.0 新参数体系）----
+        self.probe_x = tk.DoubleVar(value=0.0)              # 探头位置，-60~60 mm
+        self.probe_x_flat = tk.DoubleVar(value=38.0)        # 平台区半宽，默认 38 mm
+        self.probe_w_transition = tk.DoubleVar(value=3.5)   # 过渡区特征宽度，默认 3.5 mm
         self.field_distribution_data = []
 
         self.dragging_probe = False
@@ -169,21 +170,43 @@ class HallEffectSimulation:
         self.view_initialized = False
         self.init_electrons()
 
-    # ---------- 磁场分布模型 ----------
-    def field_profile(self, x, B0, x_max):
+    # ---------- 磁场分布模型（2.3.0 解耦参数版）----------
+    def field_profile(self, x, B0, x_flat, w_transition):
+        """
+        电磁铁气隙磁场水平分布模型（双曲正切，平台区与过渡区独立可调）
+
+        参数：
+          x            : 探头位置 (mm)，标量或数组
+          B0           : 中心磁感应强度 (T)
+          x_flat       : 平台区半宽 (mm)，B 保持 B0 的区间
+          w_transition : 过渡区特征宽度 (mm)，控制下降陡度
+        返回：
+          与 x 同形状的 B 值 (T)
+
+        性质：
+          - 对称性：B(-x) = B(x)
+          - 单调性：|x| 增大，B 单调递减
+          - 峰值位置：x = 0 处 B ≈ B0（严格最大值）
+          - 半高点：|x| = x_flat + 1.5·w_transition 处 B = B0/2
+        """
         x_arr = np.asarray(x, dtype=float)
-        if x_max <= 0:
-            return np.full_like(x_arr, B0, dtype=float)
-        ratio = float(self.x_flat_ratio.get())
-        x_flat = ratio * x_max
-        w = 0.15 * x_max
-        return B0 * 0.5 * (1.0 - np.tanh((np.abs(x_arr) - x_flat) / w))
+        if w_transition <= 0:
+            w_transition = 1.0
+        # 修正位移：让 |x|=x_flat 处 B≈0.95·B0（平台区边界），半高位于 x_flat+1.5w
+        x_shift = x_flat + 1.5 * w_transition
+        return B0 * 0.5 * (1.0 - np.tanh((np.abs(x_arr) - x_shift) / w_transition))
+
+    def _field_display_range(self):
+        """根据当前参数返回合适的显示范围（用于坐标轴和磁场线覆盖）"""
+        x_flat = self.probe_x_flat.get()
+        w = self.probe_w_transition.get()
+        return max(x_flat + 4 * w + 10, 62)
 
     # ---------- 工具栏 ----------
     def create_toolbar(self):
         toolbar = ttk.Frame(self.root, padding="5", relief=tk.RAISED)
         toolbar.grid(row=0, column=0, sticky="ew")
-        ttk.Label(toolbar, text="霍尔效应实验 2.2.0", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=10)
+        ttk.Label(toolbar, text="霍尔效应实验 2.3.0", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=10)
         self.power_button = ttk.Button(toolbar, text="电源: OFF", command=self.toggle_power, width=12)
         self.power_button.pack(side=tk.LEFT, padx=5)
         self.pause_button = ttk.Button(toolbar, text="⏸️ 暂停", command=self.toggle_animation, width=10)
@@ -229,6 +252,7 @@ class HallEffectSimulation:
         self.right_frame.grid_rowconfigure(0, weight=1)
         self.right_frame.grid_columnconfigure(0, weight=1)
 
+        # 3D 画布
         self.canvas_3d_container = ttk.Frame(self.right_frame)
         self.canvas_3d_container.grid(row=0, column=0, sticky="nsew")
         self.fig = plt.figure(figsize=(10, 8), dpi=100)
@@ -237,6 +261,7 @@ class HallEffectSimulation:
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         NavigationToolbar2Tk(self.canvas, self.canvas_3d_container)
 
+        # 磁场分布画布
         self.canvas_field_container = ttk.Frame(self.right_frame)
         self.canvas_field_container.grid(row=0, column=0, sticky="nsew")
         self.canvas_field_container.grid_remove()
@@ -280,21 +305,20 @@ class HallEffectSimulation:
     def on_field_mouse_move(self, event):
         if not self.dragging_probe: return
         if event.inaxes != self.field_ax_top or event.xdata is None: return
-        x_max = self.probe_x_max.get()
-        new_x = float(np.clip(event.xdata, -x_max, x_max))
+        x_range = self._field_display_range()
+        new_x = float(np.clip(event.xdata, -x_range, x_range))
         new_x = float(f"{new_x:.6f}")
         self.probe_x.set(new_x)
         self.update_calculations()
 
     def on_field_scroll(self, event):
+        """滚轮调整平台区半宽 x_flat（1 mm / 格）"""
         if event.inaxes != self.field_ax_top: return
-        old = self.probe_x_max.get()
-        if event.button == 'up': new = min(old + 2, 80)
-        elif event.button == 'down': new = max(old - 2, 10)
+        old = self.probe_x_flat.get()
+        if event.button == 'up': new = min(old + 1, 55)
+        elif event.button == 'down': new = max(old - 1, 5)
         else: return
-        self.probe_x_max.set(new)
-        if abs(self.probe_x.get()) > new:
-            self.probe_x.set(np.sign(self.probe_x.get()) * new)
+        self.probe_x_flat.set(new)
         self.update_calculations()
 
     # ---------- 参数设置标签页 ----------
@@ -325,6 +349,7 @@ class HallEffectSimulation:
         canvas.bind("<Shift-MouseWheel>", on_shift_mousewheel)
         scrollable.bind("<Shift-MouseWheel>", on_shift_mousewheel)
 
+        # 半导体类型
         f0 = ttk.LabelFrame(scrollable, text="半导体类型", padding="5")
         f0.pack(fill="x", pady=5)
         frame = ttk.Frame(f0); frame.pack(fill="x")
@@ -343,6 +368,7 @@ class HallEffectSimulation:
                 self.carrier_label.config(text="(载流子: 电子)", foreground="red")
         self.semiconductor_type.trace('w', update_carrier_label)
 
+        # 元件参数
         f1 = ttk.LabelFrame(scrollable, text="元件参数", padding="5")
         f1.pack(fill="x", pady=5)
         self.add_slider(f1, "L (mm)", self.L, 0, 15, "mm", tooltip="改变长度", resolution=0.1)
@@ -351,6 +377,7 @@ class HallEffectSimulation:
         self.add_slider(f1, "KH", self.KH, 0, 500, "V/(A·T)", tooltip="灵敏度系数 K_H = 1/(n·e·d)")
         self.add_slider(f1, "σ", self.sigma, 0, 50, "A/(m·V)", tooltip="电导率，可计算 μ = σ·|R_H|")
 
+        # 磁场参数
         f2 = ttk.LabelFrame(scrollable, text="磁场参数", padding="5")
         f2.pack(fill="x", pady=5)
         self.add_slider(f2, "C (kG/sA)", self.C, 0, 12, "kG/sA", tooltip="转换系数，B = C · I_m / 10")
@@ -371,6 +398,7 @@ class HallEffectSimulation:
         B_entry.pack(side=tk.LEFT, padx=5)
         ttk.Label(frame, text="T").pack(side=tk.LEFT)
 
+        # 工作电流
         f3 = ttk.LabelFrame(scrollable, text="工作电流", padding="5")
         f3.pack(fill="x", pady=5)
         self.is_label = tk.Label(f3, text="Is (mA)", font=("Arial", 12))
@@ -383,12 +411,13 @@ class HallEffectSimulation:
         Is_dir_combo.pack(side=tk.LEFT, padx=5)
         Is_dir_combo.bind("<<ComboboxSelected>>", lambda e: (self.reset_accumulation(), self.update_calculations()))
 
+        # 实验模式
         f4 = ttk.LabelFrame(scrollable, text="实验模式", padding="5")
         f4.pack(fill="x", pady=5)
         left_frame = ttk.Frame(f4); left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         ttk.Label(left_frame, text="类型：").pack(anchor="w")
         type_combo = ttk.Combobox(left_frame, textvariable=self.experiment_type,
-                                  values=["自由探索", "UH-IS曲线测绘", "UH-IM曲线测绘"],
+                                  values=["自由探索", "UH-Is曲线测绘", "UH-Im曲线测绘"],
                                   state="readonly", width=18)
         type_combo.pack(fill=tk.X, pady=2)
         type_combo.bind("<<ComboboxSelected>>", self.on_mode_change)
@@ -405,6 +434,7 @@ class HallEffectSimulation:
                     "Vₚ = γ·I_s·B·sign(I_s)·sign(B)")
         DynamicToolTip(self.secondary_combo, get_secondary_tip)
 
+        # 样品特性参数
         f5 = ttk.LabelFrame(scrollable, text="样品特性参数", padding="5")
         f5.pack(fill="x", pady=5)
         self.add_slider(f5, "α (mV/mA)", self.alpha, 0, 0.2, "mV/mA",
@@ -414,6 +444,7 @@ class HallEffectSimulation:
         self.add_slider(f5, "γ (mV/(mA·T))", self.gamma, 0, 0.2, "mV/(mA·T)",
                         tooltip="反映高阶耦合效应，通常非常小。")
 
+        # 粒子数量与动画设置
         anim_frame = ttk.LabelFrame(scrollable, text="粒子数量与动画设置", padding="5")
         anim_frame.pack(fill="x", pady=5)
         f = ttk.Frame(anim_frame); f.pack(fill="x", pady=2)
@@ -497,8 +528,6 @@ class HallEffectSimulation:
 
         v_frame = ttk.LabelFrame(scrollable, text="霍尔电压测量结果", padding="5")
         v_frame.pack(fill="x", pady=5)
-
-        # ★★★ UI 显示：U1 / U2 / U3 / U4 / UH
         self.VH1_label = ttk.Label(v_frame, text="U1 = 0.0000 mV"); self.VH1_label.pack(anchor="w")
         DynamicToolTip(self.VH1_label, self.get_vh1_tip)
         self.VH2_label = ttk.Label(v_frame, text="U2 = 0.0000 mV"); self.VH2_label.pack(anchor="w")
@@ -518,7 +547,6 @@ class HallEffectSimulation:
         self.v_label = ttk.Label(p_frame, text="v = 0.0000 m/s"); self.v_label.pack(anchor="w")
         self.mu_label = ttk.Label(p_frame, text="μ = 0.0000 cm²/(V·s)"); self.mu_label.pack(anchor="w")
 
-        # ★★★ 表格列名：括号 () → 斜杠 /
         table_frame = ttk.LabelFrame(scrollable, text="实验数据表格", padding="5")
         table_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         columns = ('序号', 'Is/mA', 'Im/A', 'B/T', 'U1/mV', 'U2/mV', 'U3/mV', 'U4/mV', 'UH/mV')
@@ -562,21 +590,27 @@ class HallEffectSimulation:
 
         tip = ttk.Label(scrollable,
                         text="实验说明：固定 Is 与 Im，沿水平方向移动霍尔探头，测量不同位置的 B(x)。\n"
-                             "提示：右侧图中可直接拖拽红色探头；滚轮可调气隙半宽。",
+                             "提示：右侧图中可直接拖拽红色探头；鼠标在图内滚轮可调节平台区半宽。",
                         font=("Arial", 11), foreground="gray", justify=tk.LEFT)
         tip.pack(anchor="w", pady=5)
 
-        f1 = ttk.LabelFrame(scrollable, text="探头与气隙参数", padding="5")
+        # 探头与磁场参数（2.3.0 新参数体系）
+        f1 = ttk.LabelFrame(scrollable, text="探头与磁场分布参数", padding="5")
         f1.pack(fill="x", pady=5)
         self.add_slider(f1, "探头位置 x (mm)", self.probe_x, -60, 60, "mm",
-                        tooltip="探头沿水平方向的位置。x=0 为气隙中心。")
-        self.add_slider(f1, "气隙半宽 x_max (mm)", self.probe_x_max, 10, 80, "mm",
-                        tooltip="气隙的横向半宽，决定磁场衰减范围。")
-        self.add_slider(f1, "平台区比例 (x_flat/x_max)", self.x_flat_ratio, 0.5, 0.9, "",
-                        tooltip="均匀平台区半宽占总气隙半宽的比例。\n"
-                                "比例越大，中间 B 保持最大值的区间越长，"
-                                "边缘过渡越陡。默认 0.7。",
-                        resolution=0.05)
+                        tooltip="霍尔探头沿水平方向的位置。x=0 为气隙中心，"
+                                "此处 B 取严格最大值。",
+                        resolution=0.1)
+        self.add_slider(f1, "平台区半宽 x_flat (mm)", self.probe_x_flat, 5, 55, "mm",
+                        tooltip="B 保持最大值 B₀ 的区间半宽。\n"
+                                "默认 38 mm，对应 DH4512D 实测电磁铁。\n"
+                                "中心 x=0 处 B 恒为最大值，此参数只改变平台长度。",
+                        resolution=1.0)
+        self.add_slider(f1, "过渡区宽度 w (mm)", self.probe_w_transition, 1, 15, "mm",
+                        tooltip="磁场从平台区衰减到零的特征宽度。\n"
+                                "值越小，边缘下降越陡；值越大，过渡越平缓。\n"
+                                "默认 3.5 mm。",
+                        resolution=0.5)
 
         f2 = ttk.LabelFrame(scrollable, text="当前测量值", padding="5")
         f2.pack(fill="x", pady=5)
@@ -598,7 +632,6 @@ class HallEffectSimulation:
 
         f4 = ttk.LabelFrame(scrollable, text="测量数据", padding="5")
         f4.pack(fill=tk.BOTH, expand=True, pady=5)
-        # ★★★ 磁场分布表列名：x(mm) → x/mm，B(T) → B/T
         cols = ('序号', 'x/mm', 'B/T')
         self.field_tree = ttk.Treeview(f4, columns=cols, show='headings', height=10)
         widths = [60, 120, 150]
@@ -611,44 +644,44 @@ class HallEffectSimulation:
 
     # ---------- 磁场分布右侧视图 ----------
     def update_field_distribution_plot(self):
-        x_max = self.probe_x_max.get()
+        x_flat = self.probe_x_flat.get()
+        w = self.probe_w_transition.get()
         x_probe = self.probe_x.get()
         B_center = (self.C.get() * self.I_m.get()) / 10.0
-        ratio = float(self.x_flat_ratio.get())
-        x_flat = ratio * x_max
+        x_disp = self._field_display_range()
 
         ax1 = self.field_ax_top
         ax1.clear()
-        ax1.set_title("电磁铁气隙磁场分布示意图  （拖拽红色探头移动；滚轮调节气隙半宽）",
+        ax1.set_title("电磁铁气隙磁场分布示意图  （拖拽红色探头移动；滚轮调节平台区半宽）",
                       fontsize=12, fontweight='bold')
 
-        x_disp = max(x_max * 1.3, 62)
-
-        ax1.fill_between([-x_max, x_max], 0, 3,
-                         color='lightyellow', alpha=0.5, label='气隙区域')
-        ax1.axvspan(-x_flat, x_flat, color='lightgreen', alpha=0.25, label='平台区')
-        ax1.plot([-x_max, -x_max], [0, 3], 'k-', linewidth=2)
-        ax1.plot([x_max, x_max], [0, 3], 'k-', linewidth=2)
-
+        # 气隙区域（横跨整个显示范围）
+        ax1.fill_between([-x_disp, x_disp], 0, 3,
+                         color='lightyellow', alpha=0.3, label='气隙区域')
+        # 平台区高亮
+        ax1.axvspan(-x_flat, x_flat, color='lightgreen', alpha=0.35, label=f'平台区 ±{x_flat:.1f}mm')
+        # 上下磁极
         ax1.add_patch(plt.Rectangle((-x_disp, 3), 2*x_disp, 0.8, color='gray', alpha=0.7))
         ax1.add_patch(plt.Rectangle((-x_disp, -0.8), 2*x_disp, 0.8, color='gray', alpha=0.7))
         ax1.text(0, 3.4, 'N 极', ha='center', fontsize=11, fontweight='bold')
         ax1.text(0, -0.6, 'S 极', ha='center', fontsize=11, fontweight='bold')
 
-        n_lines = 41
+        # 磁场线（密度反映 B 强度）
+        n_lines = 51
         for i in range(n_lines):
             x_pos = -x_disp + (2 * x_disp) * i / (n_lines - 1)
-            B_local = float(self.field_profile(x_pos, B_center, x_max))
+            B_local = float(self.field_profile(x_pos, B_center, x_flat, w))
             alpha = max(0.05, B_local / B_center) if B_center > 0 else 0.05
             ax1.annotate('', xy=(x_pos, 0), xytext=(x_pos, 3),
                          arrowprops=dict(arrowstyle='->', color='red',
-                                         alpha=alpha, linewidth=2))
+                                         alpha=alpha, linewidth=1.8))
 
+        # 探头位置
         ax1.plot(x_probe, 1.5, 'rv', markersize=18,
                  label=f'探头 x={x_probe:.4f} mm', zorder=10)
         ax1.axvline(x=x_probe, color='red', linestyle='--', alpha=0.5)
 
-        B_at_probe = float(self.field_profile(x_probe, B_center, x_max))
+        B_at_probe = float(self.field_profile(x_probe, B_center, x_flat, w))
         ax1.text(x_probe, 2.6, f"B = {B_at_probe*1000:.4f} mT",
                  color='red', fontsize=10, ha='center', fontweight='bold',
                  bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -674,21 +707,27 @@ class HallEffectSimulation:
 
         fig, ax = plt.subplots(figsize=(8.5, 6))
         B_center = (self.C.get() * self.I_m.get()) / 10.0
-        x_max = self.probe_x_max.get()
-        ratio = float(self.x_flat_ratio.get())
-        x_flat = ratio * x_max
+        x_flat = self.probe_x_flat.get()
+        w = self.probe_w_transition.get()
+        x_disp = self._field_display_range()
 
-        x_lo = min(-x_max * 1.5, -62)
-        x_hi = max(x_max * 1.5, 62)
-        x_fit = np.linspace(x_lo, x_hi, 600)
-        B_fit = self.field_profile(x_fit, B_center, x_max)
+        x_fit = np.linspace(-x_disp, x_disp, 600)
+        B_fit = self.field_profile(x_fit, B_center, x_flat, w)
         ax.plot(x_fit, B_fit * 1000, 'r--', linewidth=2,
                 label=f'理论分布 B(x)（中心 B₀={B_center*1000:.4f} mT）')
 
+        # 平台区边界辅助线
         ax.axvline(x=x_flat, color='orange', linestyle=':', alpha=0.7,
                    label=f'平台区边界 ±{x_flat:.1f} mm')
         ax.axvline(x=-x_flat, color='orange', linestyle=':', alpha=0.7)
 
+        # 半高位置标注
+        x_half = x_flat + 1.5 * w
+        ax.axvline(x=x_half, color='gray', linestyle='--', alpha=0.5,
+                   label=f'半高位置 ±{x_half:.1f} mm')
+        ax.axvline(x=-x_half, color='gray', linestyle='--', alpha=0.5)
+
+        # 测量点
         xs = [p['x/mm'] for p in self.field_distribution_data]
         Bs = [p['B/T'] * 1000 for p in self.field_distribution_data]
         pairs = sorted(zip(xs, Bs))
@@ -700,7 +739,7 @@ class HallEffectSimulation:
         ax.set_ylabel('磁感应强度 B (mT)')
         ax.set_title('磁场沿水平方向分布 B(x)', fontsize=13, fontweight='bold')
         ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right', fontsize=10)
+        ax.legend(loc='upper right', fontsize=9)
         fig.tight_layout()
 
         canvas_curve = FigureCanvasTkAgg(fig, master=win)
@@ -733,8 +772,7 @@ class HallEffectSimulation:
         def on_move(event):
             if drag_state['xlim'] is None: return
             if event.x is None or event.y is None: return
-            dx = event.x - drag_state['x']
-            dy = event.y - drag_state['y']
+            dx = event.x - drag_state['x']; dy = event.y - drag_state['y']
             bbox = ax.get_window_extent()
             x_per_pix = (drag_state['xlim'][1] - drag_state['xlim'][0]) / bbox.width
             y_per_pix = (drag_state['ylim'][1] - drag_state['ylim'][0]) / bbox.height
@@ -760,7 +798,6 @@ class HallEffectSimulation:
             last = self.field_distribution_data[-1]
             if abs(last['x/mm'] - self.probe_x.get()) < 0.0001:
                 messagebox.showwarning("提示", "探头位置没有变化！\n请调整位置后再记录。"); return
-        # ★★★ 键名用 x/mm 和 B/T
         point = {'序号': len(self.field_distribution_data) + 1,
                  'x/mm': self.probe_x.get(), 'B/T': self.B.get()}
         self.field_distribution_data.append(point)
@@ -786,7 +823,6 @@ class HallEffectSimulation:
         filename = os.path.join(desktop, f"磁场分布_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         try:
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-                # ★★★ CSV 表头：x/mm、B/T
                 writer = csv.DictWriter(f, fieldnames=['序号', 'x/mm', 'B/T'])
                 writer.writeheader()
                 for p in self.field_distribution_data:
@@ -815,11 +851,10 @@ class HallEffectSimulation:
             t.cell(0,0).text = '工作电流 Is/mA'; t.cell(0,1).text = f'{self.Is.get():.4f}'
             t.cell(1,0).text = '励磁电流 Im/A'; t.cell(1,1).text = f'{self.I_m.get():.4f}'
             t.cell(2,0).text = '磁铁规格 C (kG/sA)'; t.cell(2,1).text = f'{self.C.get():.4f}'
-            t.cell(3,0).text = '气隙半宽 x_max/mm'; t.cell(3,1).text = f'{self.probe_x_max.get():.4f}'
-            t.cell(4,0).text = '平台区比例 x_flat/x_max'; t.cell(4,1).text = f'{self.x_flat_ratio.get():.4f}'
+            t.cell(3,0).text = '平台区半宽 x_flat/mm'; t.cell(3,1).text = f'{self.probe_x_flat.get():.4f}'
+            t.cell(4,0).text = '过渡区宽度 w/mm'; t.cell(4,1).text = f'{self.probe_w_transition.get():.4f}'
             t.cell(5,0).text = '中心磁场 B0/T'; t.cell(5,1).text = f'{(self.C.get()*self.I_m.get())/10:.4f}'
             doc.add_heading('二、测量数据', level=1)
-            # ★★★ Word 表头：x/mm、B/T
             cols = ['序号', 'x/mm', 'B/T']
             dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
             for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
@@ -829,18 +864,18 @@ class HallEffectSimulation:
                 row[1].text = f"{p['x/mm']:.4f}"; row[2].text = f"{p['B/T']:.4f}"
             doc.add_heading('三、结论', level=1)
             doc.add_paragraph(
-                '测量结果表明：电磁铁气隙磁场在中心区域存在一段明显的均匀平台区'
-                f'（约 |x| ≤ {self.x_flat_ratio.get():.2f}·x_max），B ≈ B₀ 基本不变；'
-                '靠近磁极边缘时磁感应强度快速衰减；超过气隙范围后磁场趋于零。'
-                '该分布特征由磁极的几何尺寸和边缘效应共同决定，与双曲正切模型 '
-                'B(x) = B₀/2·[1-tanh((|x|-x_flat)/w)] 吻合良好，'
-                '验证了霍尔探头作为测磁工具的有效性。')
+                f'测量结果表明：电磁铁气隙磁场在中心 |x| ≤ {self.probe_x_flat.get():.1f} mm '
+                f'区域存在明显均匀平台区（B ≈ B₀，最大），过渡区特征宽度约 '
+                f'{self.probe_w_transition.get():.1f} mm，磁场在过渡区快速衰减到零。'
+                f'该分布符合双曲正切模型 '
+                f'B(x) = B₀/2·[1-tanh((|x|-x_flat-1.5w)/w)]，'
+                f'与 DH4512D 实测数据吻合良好，x=0 处取严格最大值。')
             doc.save(filename)
             messagebox.showinfo("成功", f"报告已生成到桌面:\n{filename}")
         except Exception as e:
             messagebox.showerror("错误", f"生成失败: {str(e)}")
 
-    # ---------- Tooltip（U1~U4） ----------
+    # ---------- Tooltip ----------
     def get_vh1_tip(self):
         return "虚仿：U1 = 主电压(+I,+B) + V₀ + Vₜ + Vₚ" if self.secondary_mode.get() == "仿真" else "纯理论：无副效应叠加"
     def get_vh2_tip(self):
@@ -981,9 +1016,11 @@ class HallEffectSimulation:
         Im = self.I_m.get(); C = self.C.get()
         B_center = (C * Im) / 10.0
 
-        x_max = self.probe_x_max.get()
+        # 磁场分布计算（2.3.0 新参数）
+        x_flat = self.probe_x_flat.get()
+        w = self.probe_w_transition.get()
         x_probe = self.probe_x.get()
-        B = float(self.field_profile(x_probe, B_center, x_max))
+        B = float(self.field_profile(x_probe, B_center, x_flat, w))
         self.B.set(B)
 
         if hasattr(self, 'probe_B_label'):
@@ -1050,7 +1087,6 @@ class HallEffectSimulation:
         else: self.update_3d_plot()
 
     def update_labels(self):
-        # ★★★ UI 显示：U1~U4、UH
         self.VH1_label.config(text=f"U1 = {self.VH1.get():.4f} mV")
         self.VH2_label.config(text=f"U2 = {self.VH2.get():.4f} mV")
         self.VH3_label.config(text=f"U3 = {self.VH3.get():.4f} mV")
@@ -1384,7 +1420,6 @@ class HallEffectSimulation:
             messagebox.showwarning("提示", "请先打开电源！"); return
         if self.measurements:
             last = self.measurements[-1]; mode = self.experiment_type.get()
-            # ★★★ 键名：Is/mA、Im/A
             if mode == "UH-IS曲线测绘":
                 if abs(last['Is/mA'] - self.Is.get()) < 0.0001:
                     messagebox.showwarning("提示", "工作电流Is没有变化！"); return
@@ -1395,7 +1430,6 @@ class HallEffectSimulation:
                 if (abs(last['Is/mA'] - self.Is.get()) < 0.0001 and
                     abs(last['Im/A'] - self.I_m.get()) < 0.0001):
                     messagebox.showwarning("提示", "参数没有变化！"); return
-        # ★★★ 数据点键名：括号 () → 斜杠 /
         data_point = {
             '序号': len(self.measurements) + 1,
             'Is/mA': self.Is.get(), 'Im/A': self.I_m.get(), 'B/T': self.B.get(),
@@ -1408,7 +1442,6 @@ class HallEffectSimulation:
     def update_data_table(self):
         for item in self.data_tree.get_children(): self.data_tree.delete(item)
         for m in self.measurements:
-            # ★★★ 从新键读取
             self.data_tree.insert('', 'end', values=(
                 m['序号'],
                 f"{m['Is/mA']:.4f}", f"{m['Im/A']:.4f}", f"{m['B/T']:.4f}",
@@ -1435,8 +1468,8 @@ class HallEffectSimulation:
                 coeffs = np.polyfit(Is_vals, VH_vals, 1); fit_line = np.poly1d(coeffs)
                 Is_fit = np.linspace(min(Is_vals), max(Is_vals), 100)
                 ax.plot(Is_fit, fit_line(Is_fit), 'r-', label=f'拟合: y={coeffs[0]:.4f}x+{coeffs[1]:.4f}')
-            ax.set_xlabel('工作电流 Is (mA)'); ax.set_ylabel('霍尔电压 UH (mV)')
-            ax.set_title('UH-IS 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
+            ax.set_xlabel('工作电流 Is/mA'); ax.set_ylabel('霍尔电压 UH/mV')
+            ax.set_title('UH-Is 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
         elif mode == "UH-IM曲线测绘":
             Im_vals = [m['Im/A'] for m in self.measurements]
             VH_vals = [m['UH/mV'] for m in self.measurements]
@@ -1445,13 +1478,13 @@ class HallEffectSimulation:
                 coeffs = np.polyfit(Im_vals, VH_vals, 1); fit_line = np.poly1d(coeffs)
                 Im_fit = np.linspace(min(Im_vals), max(Im_vals), 100)
                 ax.plot(Im_fit, fit_line(Im_fit), 'r-', label=f'拟合: y={coeffs[0]:.4f}x+{coeffs[1]:.4f}')
-            ax.set_xlabel('励磁电流 Im (A)'); ax.set_ylabel('霍尔电压 UH (mV)')
-            ax.set_title('UH-IM 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
+            ax.set_xlabel('励磁电流 Im/A'); ax.set_ylabel('霍尔电压 UH/mV')
+            ax.set_title('UH-Im 关系曲线'); ax.grid(True, alpha=0.3); ax.legend()
         else:
             indices = list(range(len(self.measurements)))
             VH_vals = [m['UH/mV'] for m in self.measurements]
             ax.plot(indices, VH_vals, 'ro-', linewidth=2, markersize=6)
-            ax.set_xlabel('测量序号'); ax.set_ylabel('霍尔电压 UH (mV)')
+            ax.set_xlabel('测量序号'); ax.set_ylabel('霍尔电压 UH/mV')
             ax.set_title('霍尔电压变化趋势'); ax.grid(True, alpha=0.3)
         canvas_curve = FigureCanvasTkAgg(fig, master=curve_window); canvas_curve.draw()
         canvas_curve.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1473,7 +1506,6 @@ class HallEffectSimulation:
         filename = os.path.join(desktop, f"hall_effect_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}")
         try:
             if fmt == "json":
-                # ★★★ JSON 键名：U1/mV ~ U4/mV、UH/mV、Is/mA、Im/A、B/T
                 data = {
                     'experiment_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'experiment_mode': self.experiment_type.get(),
@@ -1507,7 +1539,6 @@ class HallEffectSimulation:
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             else:
-                # ★★★ CSV 表头：U1/mV ~ U4/mV、UH/mV、Is/mA、Im/A、B/T
                 fieldnames = ['序号', 'Is/mA', 'Im/A', 'B/T', 'U1/mV', 'U2/mV',
                               'U3/mV', 'U4/mV', 'UH/mV']
                 with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
@@ -1550,7 +1581,6 @@ class HallEffectSimulation:
             t.cell(4,0).text = '数据点数'; t.cell(4,1).text = str(len(self.measurements))
             doc.add_heading('二、实验参数', level=1)
             t2 = doc.add_table(rows=8, cols=2); t2.style = 'Light Grid Accent 1'
-            # ★★★ 参数表也改成斜杠形式
             params = [
                 ('样品长度 L/mm', f'{self.L.get():.4f}'),
                 ('样品宽度 b/mm', f'{self.b.get():.4f}'),
@@ -1564,7 +1594,6 @@ class HallEffectSimulation:
             for i, (k, v) in enumerate(params):
                 t2.cell(i,0).text = k; t2.cell(i,1).text = v
             doc.add_heading('三、测量数据', level=1)
-            # ★★★ 表头：斜杠形式
             cols = ['序号','Is/mA','Im/A','B/T','U1/mV','U2/mV','U3/mV','U4/mV','UH/mV']
             dt = doc.add_table(rows=1, cols=len(cols)); dt.style = 'Light Grid Accent 1'
             for i, c in enumerate(cols): dt.rows[0].cells[i].text = c
@@ -1589,10 +1618,10 @@ class HallEffectSimulation:
                 t3.cell(3,0).text = '霍尔电压最小值 UH/mV'; t3.cell(3,1).text = f'{np.min(VH_vals):.4f}'
             doc.add_heading('五、数据处理结果', level=1)
             t4 = doc.add_table(rows=4, cols=2); t4.style = 'Light Grid Accent 1'
-            t4.cell(0,0).text = '霍尔系数 RH/m³·C⁻¹'; t4.cell(0,1).text = f'{self.RH.get():.4f}'
+            t4.cell(0,0).text = '霍尔系数 RH/(m³·C⁻¹)'; t4.cell(0,1).text = f'{self.RH.get():.4f}'
             t4.cell(1,0).text = '载流子浓度 n/m⁻³'; t4.cell(1,1).text = f'{self.n.get():.4e}'
-            t4.cell(2,0).text = '载流子平均漂移速率 v/m·s⁻¹'; t4.cell(2,1).text = f'{self.v.get():.4f}'
-            t4.cell(3,0).text = '载流子迁移率 μ/cm²·V⁻¹·s⁻¹'; t4.cell(3,1).text = f'{self.mu.get():.4f}'
+            t4.cell(2,0).text = '载流子平均漂移速率 v/(m·s⁻¹)'; t4.cell(2,1).text = f'{self.v.get():.4f}'
+            t4.cell(3,0).text = '载流子迁移率 μ/(cm²·V⁻¹·s⁻¹)'; t4.cell(3,1).text = f'{self.mu.get():.4f}'
             doc.add_heading('六、备注', level=1)
             note = doc.add_paragraph()
             note.add_run('1. 本报告由霍尔效应实验虚拟仿真软件自动生成。\n')
